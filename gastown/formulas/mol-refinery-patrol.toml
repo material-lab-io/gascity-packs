@@ -883,22 +883,17 @@ if [ "$MERGED_SHA" != "$REMOTE" ]; then
   exit 1
 fi
 
-gc bd update "$WORK" \
-  --set-metadata merge_result=merged \
-  --set-metadata merged_sha="$MERGED_SHA" \
-  --set-metadata merged_target="$TARGET" \
-  --unset-metadata rejection_reason && \
-gc bd close "$WORK" --reason "Merged to $TARGET at $MERGED_SHORT"
+gc refinery close-merged "$WORK" --sha "$MERGED_SHA" --target "$TARGET"
 ```
 
 If the script exits non-zero: STOP. Debug and retry. Do NOT write merge
 metadata, close the bead, or delete the source branch.
 
-Both the `--set-metadata` write and the `gc bd close` are required —
-`merged_sha` and `merged_target` are the only forensic breadcrumbs tying a
-closed bead to its merge commit on `$TARGET`. `--unset-metadata
-rejection_reason` clears any stale rejection field from an earlier
-rejected/reworked attempt before the successful close.
+`gc refinery close-merged` writes the merge record (`merged_sha`,
+`merged_target`, `merged_source_branch`) and then closes the bead as one
+operation; it never closes the bead if the record did not persist, and it
+clears any stale `rejection_reason`. Re-running with the same record is a
+no-op. Do not write merge metadata or close the bead any other way.
 
 **2. Cleanup:**
 ```bash
@@ -1133,22 +1128,14 @@ If this command fails or prints empty output: STOP. Debug and retry. Do NOT cont
 
 **4. Record PR metadata and close the work bead:**
 
-Run as a single chained command so the metadata write cannot be skipped
-when the close-reason already names the PR. Both the `--set-metadata`
-write and the `gc bd close` are required — `pr_url` and `pr_number`
-are the only forensic breadcrumbs tying a closed bead to its pull
-request. `--unset-metadata rejection_reason` clears any stale rejection
-field from an earlier rejected/reworked attempt before the successful
-close.
+`gc refinery close-merged` writes the pull-request record (`pr_url`,
+`pr_number`, `merged_target`) and then closes the bead as one operation; it
+never closes the bead if the record did not persist, and it clears any stale
+`rejection_reason`. `pr_url` and `pr_number` are the only forensic
+breadcrumbs tying a closed bead to its pull request.
 
 ```bash
-gc bd update $WORK \
-  --set-metadata merge_result=pull_request \
-  --set-metadata pr_url="$PR_URL" \
-  --set-metadata pr_number="$PR_NUMBER" \
-  --set-metadata merged_target="$TARGET" \
-  --unset-metadata rejection_reason && \
-gc bd close $WORK --reason "Pull request ready: $PR_URL"
+gc refinery close-merged $WORK --pr-url "$PR_URL" --pr-number "$PR_NUMBER" --target "$TARGET"
 ```
 
 **5. Cleanup:**
