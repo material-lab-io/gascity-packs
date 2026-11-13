@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # status-line.sh — tmux status-right helper for Gas Town agents.
 # Usage: status-line.sh <agent-name> [city-path]
 # Called by tmux every status-interval seconds via #(command).
@@ -12,6 +12,41 @@
 agent="$1"
 city="${2:-${GC_CITY:-${GT_ROOT:-${GC_DIR:-}}}}"
 [ -z "$agent" ] && exit 0
+
+# Zero-fork cache hit: tmux runs this for every session on every render, so the
+# hit path must not spawn id/tr/cksum/awk/date/stat. With bash >= 4.2 (builtin
+# EPOCHSECONDS) a sidecar file "<epoch> <hooks> <mail>" keyed by the raw
+# city+agent is validated with builtins only. Anything else (older bash, no
+# sidecar, stale) falls through to the portable path below, which refreshes it.
+fast_file=
+if [ -n "${EPOCHSECONDS:-}" ]; then
+    if [ -n "${GC_STATUSLINE_CACHE_DIR:-}" ]; then
+        fast_dir="$GC_STATUSLINE_CACHE_DIR"
+    elif [ -n "${UID:-}" ]; then
+        fast_dir="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/gc-statusline-$UID"
+    else
+        fast_dir=
+    fi
+    if [ -n "$fast_dir" ]; then
+        fast_key="${city}|${agent}"
+        fast_file="$fast_dir/fast-${fast_key//[!A-Za-z0-9._-]/_}"
+        fast_ttl="${GC_STATUSLINE_TTL:-30}"
+        case "$fast_ttl" in ''|*[!0-9]*) fast_ttl=30 ;; esac
+        if [ -r "$fast_file" ] && read -r f_ts f_w f_m < "$fast_file" 2>/dev/null; then
+            case "$f_ts$f_w$f_m" in
+                ''|*[!0-9]*) ;;
+                *)
+                    if [ "$((EPOCHSECONDS - f_ts))" -lt "$fast_ttl" ]; then
+                        printf '%s' "$agent"
+                        [ "$f_w" -gt 0 ] && printf ' | 🪝 %d' "$f_w"
+                        [ "$f_m" -gt 0 ] && printf ' | 📬 %d' "$f_m"
+                        exit 0
+                    fi
+                    ;;
+            esac
+        fi
+    fi
+fi
 
 if [ -n "$city" ] && [ -d "$city" ]; then
     cd "$city" 2>/dev/null || true
@@ -112,6 +147,10 @@ else
         m=$(first_number gc mail check "$agent")
 
         printf '%s %s\n' "${w:-0}" "${m:-0}" > "$cache" 2>/dev/null || true
+        if [ -n "$fast_file" ]; then
+            printf '%s %s %s\n' "$EPOCHSECONDS" "${w:-0}" "${m:-0}" > "$fast_file.$$" 2>/dev/null &&
+                mv -f "$fast_file.$$" "$fast_file" 2>/dev/null || true
+        fi
     else
         # Refresh already in flight: serve stale values. Break locks older
         # than 120s so a killed refresher cannot wedge the status line.
