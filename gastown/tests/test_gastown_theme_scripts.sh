@@ -205,7 +205,38 @@ SH
         fail "tmux-theme did not quote and pass city path to status-line"
 }
 
+test_status_line_cache_hit_spawns_no_helper_processes() {
+    local tmp city bin cache log spawn output name
+    tmp=$(mktemp -d)
+    city="$tmp/city-a"
+    bin="$tmp/bin"
+    cache="$tmp/cache"
+    log="$tmp/gc.log"
+    spawn="$tmp/spawn.log"
+    mkdir -p "$city" "$cache"
+    write_count_stubs "$bin"
+    for name in id tr cksum awk date stat timeout jq; do
+        printf '#!/usr/bin/env sh\nprintf "%%s\\n" "%s" >>"$SPAWN_LOG"\nexec "$(PATH=${ORIG_PATH} command -v %s)" "$@"\n' "$name" "$name" >"$bin/$name"
+        chmod +x "$bin/$name"
+    done
+
+    run_line() {
+        SPAWN_LOG="$spawn" ORIG_PATH="$PATH" GC_LOG="$log" GC_STATUSLINE_CACHE_DIR="$cache" PATH="$bin:$PATH" "$SCRIPTS/status-line.sh" alpha "$city"
+    }
+
+    output=$(run_line) || fail "status-line exited non-zero on warm-up"
+    [[ "$output" == "alpha | 🪝 2 | 📬 1" ]] || fail "unexpected warm-up output: $output"
+
+    : >"$spawn"
+    : >"$log"
+    output=$(run_line) || fail "status-line exited non-zero on cache hit"
+    [[ "$output" == "alpha | 🪝 2 | 📬 1" ]] || fail "unexpected cache-hit output: $output"
+    [[ ! -s "$log" ]] || fail "cache hit still called gc"
+    [[ ! -s "$spawn" ]] || fail "cache hit spawned helpers: $(tr '\n' ' ' <"$spawn")"
+}
+
 test_status_line_counts_with_bounded_gc_commands_and_cache
+test_status_line_cache_hit_spawns_no_helper_processes
 test_status_line_cache_is_city_scoped
 test_status_line_falls_back_to_agent_only_on_query_failure
 test_status_line_counts_ready_work_not_queued_nudges
