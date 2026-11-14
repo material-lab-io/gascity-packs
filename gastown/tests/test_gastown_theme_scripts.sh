@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if (( BASH_VERSINFO[0] < 4 )); then
+    echo "SKIP: bash<4 (running bash ${BASH_VERSION}; not a pass)"
+    exit 2
+fi
+
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 SCRIPTS="$ROOT/gastown/assets/scripts"
 
@@ -231,6 +236,7 @@ SH
 
 test_status_line_cache_hit_spawns_no_helper_processes() {
     local tmp city bin cache log spawn output name
+    [[ -n "${EPOCHSECONDS:-}" ]] || { echo "skip: bash without EPOCHSECONDS has no zero-fork path"; return 0; }
     tmp=$(mktemp -d)
     city="$tmp/city-a"
     bin="$tmp/bin"
